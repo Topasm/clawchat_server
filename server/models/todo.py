@@ -1,0 +1,41 @@
+from datetime import datetime, timezone
+
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from database import Base
+from utils import make_id
+
+
+class Todo(Base):
+    __tablename__ = "todos"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("todo_"))
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    priority: Mapped[str] = mapped_column(String, nullable=False, default="medium")
+    due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    conversation_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("conversations.id"), nullable=True
+    )
+    message_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("messages.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+    tags: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
+
+    __table_args__ = (
+        Index("idx_todos_status", "status"),
+        Index("idx_todos_due_date", "due_date"),
+        Index("idx_todos_conversation_id", "conversation_id"),
+    )

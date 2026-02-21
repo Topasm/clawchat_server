@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+server/venv/
+
+# Environment variables
+server/.env
+
+# Database
+server/data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
