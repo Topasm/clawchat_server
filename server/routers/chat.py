@@ -1,8 +1,10 @@
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import StreamingResponse
 
 from auth.dependencies import get_current_user
 from database import get_db
@@ -13,14 +15,22 @@ from schemas.chat import (
     ConversationDetailResponse,
     ConversationResponse,
     CreateConversationRequest,
+    MessageEditRequest,
     MessageResponse,
     SendMessageRequest,
     SendMessageResponse,
+    StreamSendRequest,
 )
 from schemas.common import PaginatedResponse
 from utils import make_id
 
 router = APIRouter()
+
+SYSTEM_PROMPT = (
+    "You are ClawChat, a helpful and friendly AI personal assistant. "
+    "You help the user manage their tasks, calendar, notes, and answer general questions. "
+    "Be concise but thorough. Use a warm, professional tone."
+)
 
 
 @router.get("/conversations", response_model=PaginatedResponse[ConversationResponse])
@@ -66,7 +76,7 @@ async def list_conversations(
                 created_at=conv.created_at,
                 updated_at=conv.updated_at,
                 is_archived=conv.is_archived,
-                last_message_preview=preview,
+                last_message=preview,
             )
         )
 
@@ -132,6 +142,94 @@ async def archive_conversation(
     conv.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return {"message": "Conversation archived"}
+
+
+@router.post("/stream")
+async def stream_chat(
+    body: StreamSendRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(get_current_user),
+):
+    conv = await db.get(Conversation, body.conversation_id)
+    if not conv:
+        raise NotFoundError("Conversation not found")
+
+    # Save user message
+    user_msg = Message(
+        id=make_id("msg_"),
+        conversation_id=body.conversation_id,
+        role="user",
+        content=body.content,
+    )
+    db.add(user_msg)
+    conv.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    # Build message history (last 20)
+    q = (
+        select(Message)
+        .where(Message.conversation_id == body.conversation_id)
+        .order_by(Message.created_at.desc())
+        .limit(20)
+    )
+    rows = (await db.execute(q)).scalars().all()
+    history = list(reversed(rows))
+
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for msg in history:
+        messages.append({"role": msg.role, "content": msg.content})
+
+    assistant_msg_id = make_id("msg_")
+    ai_service = request.app.state.ai_service
+    session_factory = request.app.state.session_factory
+
+    async def event_generator():
+        meta = json.dumps(
+            {"conversation_id": body.conversation_id, "message_id": assistant_msg_id}
+        )
+        yield f"data: {meta}\n\n"
+
+        accumulated = ""
+        try:
+            async for token in ai_service.stream_completion(messages):
+                accumulated += token
+                yield f"data: {json.dumps({'token': token})}\n\n"
+        except Exception:
+            if not accumulated:
+                error_text = "Sorry, an error occurred while generating a response."
+                accumulated = error_text
+                yield f"data: {json.dumps({'token': error_text})}\n\n"
+
+        yield "data: [DONE]\n\n"
+
+        # Save assistant message with a fresh session
+        async with session_factory() as save_db:
+            assistant_msg = Message(
+                id=assistant_msg_id,
+                conversation_id=body.conversation_id,
+                role="assistant",
+                content=accumulated,
+            )
+            save_db.add(assistant_msg)
+            save_conv = await save_db.get(Conversation, body.conversation_id)
+            if save_conv:
+                save_conv.updated_at = datetime.now(timezone.utc)
+                # Auto-generate title on first message
+                if not save_conv.title:
+                    try:
+                        title = await ai_service.generate_title(body.content)
+                        save_conv.title = title
+                        yield f"data: {json.dumps({'title_generated': title})}\n\n"
+                    except Exception:
+                        pass
+            await save_db.commit()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/send", response_model=SendMessageResponse, status_code=202)
@@ -208,3 +306,49 @@ async def list_messages(
         page=page,
         limit=limit,
     )
+
+
+@router.delete("/conversations/{conversation_id}/messages/{message_id}")
+async def delete_message(
+    conversation_id: str,
+    message_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(get_current_user),
+):
+    conv = await db.get(Conversation, conversation_id)
+    if not conv:
+        raise NotFoundError("Conversation not found")
+
+    msg = await db.get(Message, message_id)
+    if not msg or msg.conversation_id != conversation_id:
+        raise NotFoundError("Message not found")
+
+    await db.delete(msg)
+    await db.commit()
+    return {"message": "Message deleted"}
+
+
+@router.put(
+    "/conversations/{conversation_id}/messages/{message_id}",
+    response_model=MessageResponse,
+)
+async def edit_message(
+    conversation_id: str,
+    message_id: str,
+    body: MessageEditRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(get_current_user),
+):
+    conv = await db.get(Conversation, conversation_id)
+    if not conv:
+        raise NotFoundError("Conversation not found")
+
+    msg = await db.get(Message, message_id)
+    if not msg or msg.conversation_id != conversation_id:
+        raise NotFoundError("Message not found")
+
+    msg.content = body.content
+    conv.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(msg)
+    return MessageResponse.model_validate(msg)

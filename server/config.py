@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     ai_api_key: str = ""
     ai_model: str = "llama3.2"
 
+    # Scheduler
+    enable_scheduler: bool = False
+    briefing_time: str = "08:00"
+    reminder_check_interval: int = 5
+    debug: bool = False
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

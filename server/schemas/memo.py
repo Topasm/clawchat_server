@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 
 class MemoCreate(BaseModel):
-    title: str
+    title: str | None = None
     content: str
     tags: list[str] | None = None
 

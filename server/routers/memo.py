@@ -52,9 +52,10 @@ async def create_memo(
     db: AsyncSession = Depends(get_db),
     _user: str = Depends(get_current_user),
 ):
+    title = body.title if body.title else body.content[:50].strip()
     memo = Memo(
         id=make_id("memo_"),
-        title=body.title,
+        title=title,
         content=body.content,
         tags=json.dumps(body.tags) if body.tags else None,
     )

@@ -2,53 +2,58 @@
 
 ## Project Overview
 
-ClawChat is a privacy-first, self-hosted AI personal assistant with a standalone Python FastAPI backend and a React Native mobile app. All data stays on the user's server. The AI layer uses any OpenAI-compatible API (Ollama for local, OpenAI/Claude for cloud).
+ClawChat is a privacy-first, self-hosted AI personal assistant. This repository (`clawchat_server`) is the **standalone Python FastAPI backend**. The frontend lives in a separate `clawchat` repository (Vite + React + TypeScript + Electron).
+
+All data stays on the user's server. The AI layer uses Ollama (local) or any OpenAI-compatible API (OpenAI, Claude via proxy).
 
 ---
 
 ## Architecture
 
 ```
-┌─ React Native Mobile App ─────────────────────────────┐
-│  Screens: Chat / Assistant / Settings                  │
-│  State: Zustand stores                                 │
-│  Comms: REST (axios) + WebSocket                       │
-└────────────────────┬──────────────────────────────────┘
-                     │ HTTPS + WSS
-┌────────────────────┼──────────────────────────────────┐
-│  Self-Hosted Server │                                  │
-│                                                        │
-│  FastAPI Backend                                       │
-│  ├── Auth (JWT + PIN)                                  │
-│  ├── Routers (chat, todo, calendar, memo, search)      │
-│  ├── Services (ai_service, intent_classifier,          │
-│  │            orchestrator)                             │
-│  ├── WebSocket (streaming + real-time)                 │
-│  └── Models & Schemas (SQLAlchemy + Pydantic)          │
-│                                                        │
-│  SQLite Database (async via aiosqlite)                 │
-│  └── conversations, messages, todos, events,           │
-│      memos, agent_tasks                                │
-│                                                        │
-│  LLM Provider                                          │
-│  └── Ollama (local) or OpenAI-compatible API           │
-└────────────────────────────────────────────────────────┘
+┌─ ClawChat Desktop / Web App (separate repo) ─────────┐
+│  Vite + React 18 + TypeScript + Electron               │
+│  State: Zustand stores                                  │
+│  Comms: REST (axios) + SSE streaming                    │
+└────────────────────┬────────────────────────────────────┘
+                     │ HTTPS + SSE
+┌────────────────────┼────────────────────────────────────┐
+│  Self-Hosted Server │  (this repo)                       │
+│                                                          │
+│  FastAPI Backend (async)                                 │
+│  ├── Auth (JWT + PIN)                                    │
+│  ├── Routers (chat, todo, calendar, memo, search, today) │
+│  ├── Services (ai_service, intent_classifier,            │
+│  │            orchestrator, todo, calendar, memo)         │
+│  ├── SSE Streaming (POST /api/chat/stream)               │
+│  ├── WebSocket (WS /ws — orchestrator notifications)     │
+│  └── Models & Schemas (SQLAlchemy + Pydantic)            │
+│                                                          │
+│  SQLite Database (async via aiosqlite)                   │
+│  └── conversations, messages, todos, events, memos,      │
+│      agent_tasks                                         │
+│                                                          │
+│  LLM Provider                                            │
+│  ├── Ollama (local — native /api/chat streaming)         │
+│  └── OpenAI-compatible API (/v1/chat/completions)        │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Current State (v0.1.0) — MVP Complete
+## Current State (v0.2.0)
 
 ### What's Done
 
 #### Server Infrastructure
-- [x] FastAPI app with CORS, lifespan context manager
+- [x] FastAPI app with CORS, async lifespan context manager
 - [x] Pydantic Settings config from `.env`
 - [x] Async SQLAlchemy engine with aiosqlite
-- [x] All 6 database tables with indexes (conversations, messages, todos, events, memos, agent_tasks)
+- [x] DB tables: conversations, messages, todos, events, memos, agent_tasks
 - [x] Prefixed UUID generation (`conv_`, `msg_`, `todo_`, `evt_`, `memo_`, `task_`)
-- [x] Custom exception hierarchy with consistent error response format
+- [x] Custom exception hierarchy (`AppError`, `NotFoundError`, `AIUnavailableError`, `ValidationError`)
 - [x] `.gitignore` covering venv, .env, DB, __pycache__
+- [x] Scheduler config settings (`enable_scheduler`, `briefing_time`, `reminder_check_interval`, `debug`)
 
 #### Authentication
 - [x] PIN-based login → JWT access + refresh tokens
@@ -58,22 +63,35 @@ ClawChat is a privacy-first, self-hosted AI personal assistant with a standalone
 
 #### Chat & Messaging
 - [x] Conversation CRUD (create, list paginated, get with messages, archive)
-- [x] Send message → 202 accepted, AI processing via BackgroundTasks
-- [x] Paginated message listing per conversation
+- [x] `POST /api/chat/send` — send message → 202 accepted, AI processing via BackgroundTasks + WebSocket
+- [x] `POST /api/chat/stream` — **SSE streaming endpoint** (saves user msg, streams AI tokens, saves assistant msg)
+- [x] `GET /api/chat/conversations/:id/messages` — paginated message listing
+- [x] `DELETE /api/chat/conversations/:id/messages/:id` — delete individual message
+- [x] `PUT /api/chat/conversations/:id/messages/:id` — edit message content
 - [x] Last message preview on conversation list
+
+#### SSE Streaming Protocol
+- [x] Client POSTs to `/api/chat/stream` with `{conversation_id, content}`
+- [x] Server returns `text/event-stream` with three event types:
+  - Meta event: `data: {"conversation_id": "...", "message_id": "..."}`
+  - Token events: `data: {"token": "..."}`
+  - Done event: `data: [DONE]`
+- [x] Assistant message persisted after stream completes (fresh DB session)
+- [x] Graceful error handling (error text streamed as token on failure)
 
 #### WebSocket
 - [x] `ConnectionManager` with connect/disconnect/send_json
-- [x] `stream_to_user()` — sends stream_start → stream_chunk (per token) → stream_end
-- [x] Graceful error handling (sends stream_end on failure so clients don't hang)
+- [x] `stream_to_user()` — sends stream_start → stream_chunk → stream_end
 - [x] JWT authentication on connection
+- [x] Used by orchestrator for background task results (module actions, intent routing)
 
 #### AI Service
-- [x] OpenAI-compatible streaming completions via httpx SSE parsing
-- [x] Function calling for intent classification
-- [x] Health check endpoint (pings `/v1/models`)
-- [x] Handles both Ollama and OpenAI API
-- [x] Graceful error handling (ConnectError, Timeout → AIUnavailableError)
+- [x] **Dual provider support**: routes based on `provider` config
+  - OpenAI-compatible: `/v1/chat/completions` SSE streaming
+  - Ollama native: `/api/chat` NDJSON streaming
+- [x] Function calling for intent classification (OpenAI-compatible `/v1/chat/completions` for both providers)
+- [x] Health check: Ollama → `/api/tags`, OpenAI → `/v1/models`
+- [x] Graceful error handling (ConnectError, Timeout → `AIUnavailableError`)
 
 #### Intent Classification
 - [x] 17 intents defined with OpenAI tools/function-calling schema
@@ -82,41 +100,49 @@ ClawChat is a privacy-first, self-hosted AI personal assistant with a standalone
 
 #### Orchestrator
 - [x] Routes `general_chat` → LLM streaming with conversation context (last 20 messages)
-- [x] Routes module intents → friendly stub responses acknowledging intent + params
+- [x] Routes module intents → **real service calls** (todo, calendar, memo CRUD)
 - [x] Routes `search`, `delegate_task`, `daily_briefing` → stub messages
 - [x] Saves all assistant messages to DB with classified intent
-- [x] AI unavailable → graceful error message via WS (no crash)
+- [x] AI unavailable → graceful error message via WS
 - [x] Owns its own DB session (not request-scoped)
 
-#### Stub Routers (return empty lists / 501)
-- [x] `GET /api/todos`
-- [x] `GET /api/events`
-- [x] `GET /api/memos`
-- [x] `GET /api/search`
+#### Module Services (Async)
+- [x] `todo_service.py` — Full async CRUD, auto-sets `completed_at` on status change
+- [x] `calendar_service.py` — Full async CRUD, supports `is_all_day`, `reminder_minutes`, `tags`
+- [x] `memo_service.py` — Full async CRUD with title + content + tags
+
+#### Full CRUD Routers
+- [x] `GET/POST /api/todos`, `GET/PATCH/DELETE /api/todos/:id` — filterable by status, priority, due_before
+- [x] `GET/POST /api/events`, `GET/PATCH/DELETE /api/events/:id` — filterable by date range
+- [x] `GET/POST /api/memos`, `GET/PATCH/DELETE /api/memos/:id` — paginated, sorted by updated_at
+- [x] `GET /api/today` — consolidated dashboard (today tasks, overdue, events, inbox count, greeting)
+- [x] `GET /api/search` — stub (returns empty)
+- [x] `POST /api/notifications/register-token` — push token registration
 
 #### Health
 - [x] `GET /api/health` — returns status, version, ai_provider, ai_model, ai_connected
 - [x] Shows `"degraded"` when AI provider is unreachable
 
-### File Tree (39 source files)
+### File Tree (47 source files)
 
 ```
 clawchat_server/
 ├── .gitignore
+├── README.md
 ├── docs/
-│   └── devplan.md
+│   └── devplan.md              ← you are here
 └── server/
-    ├── main.py
-    ├── config.py
-    ├── database.py
-    ├── utils.py
-    ├── exceptions.py
+    ├── main.py                 # FastAPI app, lifespan, router wiring
+    ├── config.py               # Pydantic Settings from .env
+    ├── database.py             # Async SQLAlchemy engine + session factory
+    ├── utils.py                # make_id() prefixed UUID helper
+    ├── exceptions.py           # AppError hierarchy + error handler
     ├── requirements.txt
     ├── .env.example
     ├── auth/
     │   ├── __init__.py
-    │   ├── jwt.py
-    │   └── dependencies.py
+    │   ├── jwt.py              # JWT create/verify
+    │   └── dependencies.py     # get_current_user FastAPI dependency
     ├── models/
     │   ├── __init__.py
     │   ├── conversation.py
@@ -127,81 +153,59 @@ clawchat_server/
     │   └── agent_task.py
     ├── schemas/
     │   ├── __init__.py
-    │   ├── common.py
+    │   ├── common.py           # PaginatedResponse, ErrorResponse
     │   ├── auth.py
-    │   ├── chat.py
+    │   ├── chat.py             # StreamSendRequest, MessageEditRequest, etc.
     │   ├── todo.py
     │   ├── calendar.py
-    │   └── memo.py
+    │   ├── memo.py
+    │   └── today.py
     ├── services/
     │   ├── __init__.py
-    │   ├── ai_service.py
+    │   ├── ai_service.py       # Dual provider (OpenAI + Ollama native)
     │   ├── intent_classifier.py
-    │   └── orchestrator.py
+    │   ├── orchestrator.py     # Intent routing → real service calls
+    │   ├── todo_service.py     # Async todo CRUD
+    │   ├── calendar_service.py # Async event CRUD
+    │   └── memo_service.py     # Async memo CRUD
     ├── ws/
     │   ├── __init__.py
-    │   ├── manager.py
-    │   └── handler.py
-    └── routers/
-        ├── __init__.py
-        ├── auth.py
-        ├── chat.py
-        ├── todo.py
-        ├── calendar.py
-        ├── memo.py
-        └── search.py
+    │   ├── manager.py          # WebSocket ConnectionManager
+    │   └── handler.py          # WebSocket message router
+    ├── routers/
+    │   ├── __init__.py
+    │   ├── auth.py
+    │   ├── chat.py             # SSE /stream, message CRUD, conversations
+    │   ├── todo.py             # Full CRUD
+    │   ├── calendar.py         # Full CRUD
+    │   ├── memo.py             # Full CRUD
+    │   ├── search.py           # Stub
+    │   ├── today.py            # Dashboard aggregation
+    │   └── notifications.py    # Push token registration
+    └── data/
+        └── clawchat.db         # SQLite database (auto-created)
 ```
 
 ---
 
 ## What's Next
 
-### Phase A — Module Services (Todo / Calendar / Memo)
+### Phase A — Search & Conversation Titles
 
-Replace stub routers with full CRUD implementations.
-
-#### Todo Service
-- [ ] `POST /api/todos` — create todo (with tags as JSON)
-- [ ] `GET /api/todos/:id` — get single todo
-- [ ] `PATCH /api/todos/:id` — update fields (status, title, priority, due_date)
-- [ ] `DELETE /api/todos/:id` — delete todo
-- [ ] `GET /api/todos` — filter by status, priority, due_date range, pagination
-- [ ] Wire `create_todo` / `query_todos` / `update_todo` / `delete_todo` / `complete_todo` intents in orchestrator to actually create/query DB records
-- [ ] Return action cards via WebSocket after creating/completing todos
-
-#### Calendar Service
-- [ ] `POST /api/events` — create event
-- [ ] `GET /api/events/:id` — get single event
-- [ ] `PATCH /api/events/:id` — update event
-- [ ] `DELETE /api/events/:id` — delete event
-- [ ] `GET /api/events` — filter by date range, pagination
-- [ ] Wire `create_event` / `query_events` / `update_event` / `delete_event` intents in orchestrator
-- [ ] Return action cards via WebSocket
-
-#### Memo Service
-- [ ] `POST /api/memos` — create memo
-- [ ] `GET /api/memos/:id` — get single memo
-- [ ] `PATCH /api/memos/:id` — update memo
-- [ ] `DELETE /api/memos/:id` — delete memo
-- [ ] `GET /api/memos` — paginated list sorted by updated_at
-- [ ] Wire `create_memo` / `query_memos` / `update_memo` / `delete_memo` intents in orchestrator
-
-### Phase B — Search & Conversation Titles
-
-- [ ] Full-text search using SQLite FTS5 across messages, todos, events, memos
+- [ ] Full-text search via SQLite FTS5 (messages, todos, events, memos)
 - [ ] `GET /api/search?q=...&types=...` with relevance scoring
-- [ ] Auto-generate conversation titles from first user message (LLM summarization or first N words)
-- [ ] Wire `search` intent in orchestrator to return actual results
+- [ ] Auto-generate conversation titles from first user message (LLM summarization)
+- [ ] Wire `search` intent in orchestrator to real FTS queries
 
-### Phase C — Agent Tasks & Scheduling
+### Phase B — Agent Tasks & Scheduling
 
 - [ ] Agent task execution pipeline (queue → run → complete/fail → notify)
 - [ ] Daily briefing generation (summarize today's events + pending todos via LLM)
 - [ ] Reminder system (check upcoming events/todo deadlines, push notification via WS)
 - [ ] Wire `delegate_task` and `daily_briefing` intents to real implementations
-- [ ] Background scheduler (APScheduler or similar)
+- [ ] Background scheduler (APScheduler or asyncio-based)
 
-### Phase D — Database Migrations & Hardening
+### Phase C — Database Migrations & Hardening
 
 - [ ] Add Alembic for migration management
 - [ ] Initial migration from current `create_all()` state
@@ -211,26 +215,13 @@ Replace stub routers with full CRUD implementations.
 - [ ] Request logging middleware
 - [ ] Tests (pytest + httpx AsyncClient for API, pytest-asyncio for services)
 
-### Phase E — Mobile App
-
-- [ ] React Native (Expo) project setup
-- [ ] Auth flow (server URL + PIN → token storage)
-- [ ] Chat screen with streaming text rendering
-- [ ] Action card components (todo created, event created, etc.)
-- [ ] Todo / Calendar / Memo screens (CRUD via REST API)
-- [ ] WebSocket connection manager with auto-reconnect
-- [ ] Zustand stores for state management
-- [ ] Push notifications for reminders and agent task completion
-
-### Phase F — Deployment & Polish
+### Phase D — Deployment & Polish
 
 - [ ] Docker Compose (server + Ollama)
-- [ ] HTTPS setup guide (Tailscale / reverse proxy)
+- [ ] HTTPS setup guide (Tailscale / Caddy reverse proxy)
 - [ ] One-command setup script
-- [ ] Home screen widgets (Android + iOS)
-- [ ] Voice input support
-- [ ] Google Calendar sync (optional)
-- [ ] Backup/restore tooling
+- [ ] Backup/restore tooling for SQLite database
+- [ ] Production logging configuration
 
 ---
 
@@ -238,15 +229,17 @@ Replace stub routers with full CRUD implementations.
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Framework | FastAPI | Async, fast, built-in OpenAPI docs, WebSocket support |
+| Architecture | Separate repos | Client (Electron/web) and server are independently deployable |
+| Framework | FastAPI (async) | Async-native, fast, built-in OpenAPI docs, SSE + WebSocket support |
 | Database | SQLite + aiosqlite | Single-file, zero-config, sufficient for single-user |
-| ORM | SQLAlchemy 2.0 async | Industry standard, type-safe, migration support |
-| Auth | JWT (python-jose) | Stateless, works well with mobile + WebSocket |
-| AI client | httpx async | SSE streaming support, connection pooling |
-| Intent classification | OpenAI tools/function-calling | Structured output, works with Ollama |
-| Background processing | FastAPI BackgroundTasks | Simple, no external queue needed for MVP |
-| ID format | Prefixed UUIDs | Human-readable, debuggable (conv_, msg_, etc.) |
-| Migrations | create_all() for now | Alembic deferred to Phase D |
+| ORM | SQLAlchemy 2.0 async | Industry standard, type-safe, migration-ready |
+| Auth | JWT (python-jose) | Stateless, works with web + mobile + WebSocket |
+| AI streaming | SSE (primary) + WebSocket (orchestrator) | SSE is simpler for client consumption; WS kept for push notifications |
+| AI providers | Ollama native + OpenAI-compatible | Native Ollama avoids proxy overhead; OpenAI compat covers cloud LLMs |
+| Intent classification | OpenAI tools/function-calling | Structured output, works with both Ollama and OpenAI |
+| Background processing | FastAPI BackgroundTasks | Simple, no external queue needed for single-user |
+| ID format | Prefixed UUIDs | Human-readable, debuggable (`conv_`, `msg_`, `todo_`, `evt_`, `memo_`) |
+| Migrations | `create_all()` for now | Alembic deferred to Phase C |
 
 ---
 
@@ -263,3 +256,22 @@ uvicorn main:app --reload --port 8000
 ```
 
 API docs: `http://localhost:8000/docs`
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOST` | `0.0.0.0` | Server bind address |
+| `PORT` | `8000` | Server port |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./data/clawchat.db` | Async SQLite connection string |
+| `JWT_SECRET` | `change-this-...` | Secret key for JWT signing |
+| `JWT_EXPIRY_HOURS` | `24` | JWT access token lifetime |
+| `PIN` | `123456` | Login PIN |
+| `AI_PROVIDER` | `ollama` | `"ollama"` or `"openai"` |
+| `AI_BASE_URL` | `http://localhost:11434` | LLM API base URL |
+| `AI_API_KEY` | (empty) | API key (required for OpenAI/Claude) |
+| `AI_MODEL` | `llama3.2` | Model name |
+| `ENABLE_SCHEDULER` | `false` | Enable background scheduler |
+| `BRIEFING_TIME` | `08:00` | Daily briefing time (HH:MM) |
+| `REMINDER_CHECK_INTERVAL` | `5` | Minutes between reminder checks |
+| `DEBUG` | `false` | Enable debug logging |

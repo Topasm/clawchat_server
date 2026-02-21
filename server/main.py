@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -16,8 +17,11 @@ from routers import today as today_router
 from routers import todo as todo_router
 from services.ai_service import AIService
 from services.orchestrator import Orchestrator
+from services.scheduler import Scheduler
 from ws.handler import websocket_endpoint
 from ws.manager import ws_manager
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -29,6 +33,7 @@ async def lifespan(app: FastAPI):
         base_url=settings.ai_base_url,
         api_key=settings.ai_api_key,
         model=settings.ai_model,
+        provider=settings.ai_provider,
     )
     app.state.ai_service = ai_service
 
@@ -39,10 +44,29 @@ async def lifespan(app: FastAPI):
         session_factory=async_session_factory,
     )
 
+    app.state.session_factory = async_session_factory
+
     # Check AI connectivity
     app.state.ai_connected = await ai_service.health_check()
 
+    # Start background scheduler if enabled
+    if settings.enable_scheduler:
+        scheduler = Scheduler(
+            session_factory=async_session_factory,
+            ai_service=ai_service,
+            ws_manager=ws_manager,
+        )
+        scheduler.start()
+        app.state.scheduler = scheduler
+        logger.info("Background scheduler started")
+    else:
+        app.state.scheduler = None
+
     yield
+
+    # Stop scheduler before closing AI service
+    if app.state.scheduler:
+        await app.state.scheduler.stop()
 
     await ai_service.close()
 

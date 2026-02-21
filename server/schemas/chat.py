@@ -13,7 +13,7 @@ class ConversationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     is_archived: bool
-    last_message_preview: str | None = None
+    last_message: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -38,7 +38,16 @@ class SendMessageRequest(BaseModel):
 class SendMessageResponse(BaseModel):
     message_id: str
     conversation_id: str
-    status: str = "processing"
+    status: str = "delivered"
+
+
+class StreamSendRequest(BaseModel):
+    conversation_id: str
+    content: str
+
+
+class MessageEditRequest(BaseModel):
+    content: str
 
 
 class ConversationDetailResponse(BaseModel):
