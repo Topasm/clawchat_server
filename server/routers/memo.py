@@ -1,17 +1,124 @@
-from fastapi import APIRouter, Depends
+import json
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import get_current_user
+from database import get_db
+from exceptions import NotFoundError
+from models.memo import Memo
 from schemas.common import PaginatedResponse
-from schemas.memo import MemoResponse
+from schemas.memo import MemoCreate, MemoResponse, MemoUpdate
+from utils import make_id
 
 router = APIRouter()
 
 
 @router.get("", response_model=PaginatedResponse[MemoResponse])
-async def list_memos(_user: str = Depends(get_current_user)):
-    return PaginatedResponse(items=[], total=0, page=1, limit=20)
+async def list_memos(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(get_current_user),
+):
+    offset = (page - 1) * limit
+
+    count_q = select(func.count(Memo.id))
+    total = (await db.execute(count_q)).scalar() or 0
+
+    q = (
+        select(Memo)
+        .order_by(Memo.updated_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    rows = (await db.execute(q)).scalars().all()
+
+    items = []
+    for row in rows:
+        resp = MemoResponse.model_validate(row)
+        if row.tags:
+            resp.tags = json.loads(row.tags)
+        items.append(resp)
+
+    return PaginatedResponse(items=items, total=total, page=page, limit=limit)
 
 
-@router.post("", status_code=501)
-async def create_memo(_user: str = Depends(get_current_user)):
-    return {"error": {"code": "NOT_IMPLEMENTED", "message": "Memo module coming soon"}}
+@router.post("", response_model=MemoResponse, status_code=201)
+async def create_memo(
+    body: MemoCreate,
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(get_current_user),
+):
+    memo = Memo(
+        id=make_id("memo_"),
+        title=body.title,
+        content=body.content,
+        tags=json.dumps(body.tags) if body.tags else None,
+    )
+    db.add(memo)
+    await db.commit()
+    await db.refresh(memo)
+
+    resp = MemoResponse.model_validate(memo)
+    if memo.tags:
+        resp.tags = json.loads(memo.tags)
+    return resp
+
+
+@router.get("/{memo_id}", response_model=MemoResponse)
+async def get_memo(
+    memo_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(get_current_user),
+):
+    memo = await db.get(Memo, memo_id)
+    if not memo:
+        raise NotFoundError("Memo not found")
+    resp = MemoResponse.model_validate(memo)
+    if memo.tags:
+        resp.tags = json.loads(memo.tags)
+    return resp
+
+
+@router.patch("/{memo_id}", response_model=MemoResponse)
+async def update_memo(
+    memo_id: str,
+    body: MemoUpdate,
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(get_current_user),
+):
+    memo = await db.get(Memo, memo_id)
+    if not memo:
+        raise NotFoundError("Memo not found")
+
+    data = body.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        if key == "tags":
+            setattr(memo, key, json.dumps(value) if value else None)
+        else:
+            setattr(memo, key, value)
+
+    memo.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(memo)
+
+    resp = MemoResponse.model_validate(memo)
+    if memo.tags:
+        resp.tags = json.loads(memo.tags)
+    return resp
+
+
+@router.delete("/{memo_id}", status_code=204)
+async def delete_memo(
+    memo_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(get_current_user),
+):
+    memo = await db.get(Memo, memo_id)
+    if not memo:
+        raise NotFoundError("Memo not found")
+    await db.delete(memo)
+    await db.commit()

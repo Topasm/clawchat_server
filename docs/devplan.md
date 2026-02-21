@@ -1,268 +1,236 @@
-# AI Secretary — Development Plan
+# ClawChat Server — Development Plan
 
-## Strategy: Build on OpenClaw, Not From Scratch
+## Project Overview
 
-After reviewing OpenClaw's architecture, the smartest approach is **not** to build a standalone server from zero. OpenClaw already provides:
-
-- AI agent runtime with LLM orchestration
-- Gateway (WebSocket control plane) for real-time communication
-- Skills system (SKILL.md + scripts) for extending capabilities
-- Tool system (exec, write, read, browser, etc.)
-- Cron jobs and scheduled tasks
-- Memory and conversation history
-- Multi-channel support (WebChat, Telegram, etc.)
-
-**Our job is to build the missing pieces as OpenClaw skills + a React Native app that talks to the Gateway.**
+ClawChat is a privacy-first, self-hosted AI personal assistant with a standalone Python FastAPI backend and a React Native mobile app. All data stays on the user's server. The AI layer uses any OpenAI-compatible API (Ollama for local, OpenAI/Claude for cloud).
 
 ---
 
-## Revised Architecture
+## Architecture
 
 ```
-┌─ React Native App ─────────────────────────────────┐
-│                                                      │
-│  Widgets: Todo / Calendar / Memo / Quick AI Input    │
-│  Screens: Chat / Todo / Calendar / Memo / Settings   │
-│                                                      │
-└──────────────────────┬───────────────────────────────┘
-                       │
-                       │ WebSocket + REST
-                       │
-┌──────────────────────┼───────────────────────────────┐
-│  User's Local Server │                                │
-│                      │                                │
-│  ┌───────────────────┴──────────────────────────┐    │
-│  │            OpenClaw Gateway                   │    │
-│  │  (Node.js runtime, agent, tools, memory)      │    │
-│  └───────────┬───────────────────────────────────┘    │
-│              │                                         │
-│  ┌───────────┴───────────────────────────────────┐    │
-│  │         Custom Skills (our code)               │    │
-│  │                                                │    │
-│  │  📋 secretary-todo/     SKILL.md + scripts/    │    │
-│  │  📅 secretary-calendar/ SKILL.md + scripts/    │    │
-│  │  📝 secretary-memo/     SKILL.md + scripts/    │    │
-│  │  🤖 secretary-agent/    SKILL.md + scripts/    │    │
-│  │  📊 secretary-api/      SKILL.md + scripts/    │    │
-│  └───────────┬───────────────────────────────────┘    │
-│              │                                         │
-│  ┌───────────┴───────────────────────────────────┐    │
-│  │         SQLite (local data store)              │    │
-│  │  todos / events / memos / agent_tasks          │    │
-│  └────────────────────────────────────────────────┘    │
+┌─ React Native Mobile App ─────────────────────────────┐
+│  Screens: Chat / Assistant / Settings                  │
+│  State: Zustand stores                                 │
+│  Comms: REST (axios) + WebSocket                       │
+└────────────────────┬──────────────────────────────────┘
+                     │ HTTPS + WSS
+┌────────────────────┼──────────────────────────────────┐
+│  Self-Hosted Server │                                  │
+│                                                        │
+│  FastAPI Backend                                       │
+│  ├── Auth (JWT + PIN)                                  │
+│  ├── Routers (chat, todo, calendar, memo, search)      │
+│  ├── Services (ai_service, intent_classifier,          │
+│  │            orchestrator)                             │
+│  ├── WebSocket (streaming + real-time)                 │
+│  └── Models & Schemas (SQLAlchemy + Pydantic)          │
+│                                                        │
+│  SQLite Database (async via aiosqlite)                 │
+│  └── conversations, messages, todos, events,           │
+│      memos, agent_tasks                                │
+│                                                        │
+│  LLM Provider                                          │
+│  └── Ollama (local) or OpenAI-compatible API           │
 └────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## What We Build vs What OpenClaw Provides
+## Current State (v0.1.0) — MVP Complete
 
-| Concern | OpenClaw (already done) | We Build |
-|---------|------------------------|----------|
-| LLM orchestration | ✅ Agent runtime, model routing, failover | — |
-| Conversation | ✅ Memory, session history, context | — |
-| Scheduling | ✅ Cron jobs, webhooks | Cron configs for briefing/reminders |
-| Real-time comms | ✅ Gateway WebSocket | App ↔ Gateway bridge |
-| Todo management | — | Skill + SQLite + scripts |
-| Calendar | — (CalDAV skill exists but limited) | Skill + SQLite + Google Cal sync |
-| Notes/Memos | — | Skill + SQLite + scripts |
-| Auto agent tasks | — | Skill for delegated AI tasks |
-| Mobile app | — (WebChat exists, no native app) | React Native app + widgets |
-| REST API for app | — | Lightweight API skill/sidecar |
+### What's Done
 
----
+#### Server Infrastructure
+- [x] FastAPI app with CORS, lifespan context manager
+- [x] Pydantic Settings config from `.env`
+- [x] Async SQLAlchemy engine with aiosqlite
+- [x] All 6 database tables with indexes (conversations, messages, todos, events, memos, agent_tasks)
+- [x] Prefixed UUID generation (`conv_`, `msg_`, `todo_`, `evt_`, `memo_`, `task_`)
+- [x] Custom exception hierarchy with consistent error response format
+- [x] `.gitignore` covering venv, .env, DB, __pycache__
 
-## Repository Structure
+#### Authentication
+- [x] PIN-based login → JWT access + refresh tokens
+- [x] Token refresh endpoint
+- [x] `get_current_user` dependency protecting all endpoints
+- [x] WebSocket auth via `?token=` query param
+
+#### Chat & Messaging
+- [x] Conversation CRUD (create, list paginated, get with messages, archive)
+- [x] Send message → 202 accepted, AI processing via BackgroundTasks
+- [x] Paginated message listing per conversation
+- [x] Last message preview on conversation list
+
+#### WebSocket
+- [x] `ConnectionManager` with connect/disconnect/send_json
+- [x] `stream_to_user()` — sends stream_start → stream_chunk (per token) → stream_end
+- [x] Graceful error handling (sends stream_end on failure so clients don't hang)
+- [x] JWT authentication on connection
+
+#### AI Service
+- [x] OpenAI-compatible streaming completions via httpx SSE parsing
+- [x] Function calling for intent classification
+- [x] Health check endpoint (pings `/v1/models`)
+- [x] Handles both Ollama and OpenAI API
+- [x] Graceful error handling (ConnectError, Timeout → AIUnavailableError)
+
+#### Intent Classification
+- [x] 17 intents defined with OpenAI tools/function-calling schema
+- [x] Parameter extraction (title, due_date, priority, start_time, location, etc.)
+- [x] Falls back to `general_chat` on classification failure
+
+#### Orchestrator
+- [x] Routes `general_chat` → LLM streaming with conversation context (last 20 messages)
+- [x] Routes module intents → friendly stub responses acknowledging intent + params
+- [x] Routes `search`, `delegate_task`, `daily_briefing` → stub messages
+- [x] Saves all assistant messages to DB with classified intent
+- [x] AI unavailable → graceful error message via WS (no crash)
+- [x] Owns its own DB session (not request-scoped)
+
+#### Stub Routers (return empty lists / 501)
+- [x] `GET /api/todos`
+- [x] `GET /api/events`
+- [x] `GET /api/memos`
+- [x] `GET /api/search`
+
+#### Health
+- [x] `GET /api/health` — returns status, version, ai_provider, ai_model, ai_connected
+- [x] Shows `"degraded"` when AI provider is unreachable
+
+### File Tree (39 source files)
 
 ```
-ai-secretary/
-├── README.md
+clawchat_server/
+├── .gitignore
 ├── docs/
-│   ├── VISION.md              # Project vision (already written)
-│   └── PLAN.md                # This file
-│
-├── skills/                    # OpenClaw skills (drop into ~/.openclaw/skills/)
-│   ├── secretary-todo/
-│   │   ├── SKILL.md
-│   │   ├── scripts/
-│   │   │   ├── todo_service.py    # CRUD operations
-│   │   │   └── setup_db.py       # Initialize SQLite tables
-│   │   └── references/
-│   │       └── schema.md
-│   │
-│   ├── secretary-calendar/
-│   │   ├── SKILL.md
-│   │   ├── scripts/
-│   │   │   ├── calendar_service.py
-│   │   │   └── google_sync.py     # Optional Google Calendar sync
-│   │   └── references/
-│   │       └── schema.md
-│   │
-│   ├── secretary-memo/
-│   │   ├── SKILL.md
-│   │   ├── scripts/
-│   │   │   └── memo_service.py
-│   │   └── references/
-│   │       └── schema.md
-│   │
-│   ├── secretary-agent/
-│   │   ├── SKILL.md               # Auto-task execution skill
-│   │   ├── scripts/
-│   │   │   ├── task_runner.py
-│   │   │   └── briefing.py        # Daily briefing generator
-│   │   └── references/
-│   │       └── task_types.md
-│   │
-│   └── secretary-api/
-│       ├── SKILL.md
-│       └── scripts/
-│           └── api_server.py      # Lightweight REST API for mobile app
-│
-├── app/                       # React Native mobile app
-│   ├── package.json
-│   ├── src/
-│   │   ├── screens/
-│   │   ├── components/
-│   │   ├── widgets/
-│   │   ├── api/
-│   │   ├── store/
-│   │   └── hooks/
-│   ├── android/
-│   └── ios/
-│
-└── docker/                    # Optional Docker setup
-    ├── docker-compose.yml     # OpenClaw + skills + DB
-    └── Dockerfile
+│   └── devplan.md
+└── server/
+    ├── main.py
+    ├── config.py
+    ├── database.py
+    ├── utils.py
+    ├── exceptions.py
+    ├── requirements.txt
+    ├── .env.example
+    ├── auth/
+    │   ├── __init__.py
+    │   ├── jwt.py
+    │   └── dependencies.py
+    ├── models/
+    │   ├── __init__.py
+    │   ├── conversation.py
+    │   ├── message.py
+    │   ├── todo.py
+    │   ├── event.py
+    │   ├── memo.py
+    │   └── agent_task.py
+    ├── schemas/
+    │   ├── __init__.py
+    │   ├── common.py
+    │   ├── auth.py
+    │   ├── chat.py
+    │   ├── todo.py
+    │   ├── calendar.py
+    │   └── memo.py
+    ├── services/
+    │   ├── __init__.py
+    │   ├── ai_service.py
+    │   ├── intent_classifier.py
+    │   └── orchestrator.py
+    ├── ws/
+    │   ├── __init__.py
+    │   ├── manager.py
+    │   └── handler.py
+    └── routers/
+        ├── __init__.py
+        ├── auth.py
+        ├── chat.py
+        ├── todo.py
+        ├── calendar.py
+        ├── memo.py
+        └── search.py
 ```
 
-**Note**: Skills repo and App repo may be split later if needed. Starting as monorepo for simplicity during development.
-
 ---
 
-## Phase 1 — Foundation (Weeks 1–2)
+## What's Next
 
-**Goal**: OpenClaw running with basic todo/calendar/memo skills, accessible via WebChat.
+### Phase A — Module Services (Todo / Calendar / Memo)
 
-### 1.1 OpenClaw Setup
-- [ ] Install OpenClaw on local server
-- [ ] Configure LLM provider (Ollama local or Claude API)
-- [ ] Verify Gateway is running and WebChat works
-- [ ] Understand skill loading, tool permissions, and session flow
+Replace stub routers with full CRUD implementations.
 
-### 1.2 SQLite Data Layer
-- [ ] Design unified schema (todos, events, memos, agent_tasks)
-- [ ] Write `setup_db.py` — idempotent table creation
-- [ ] Store DB at `~/.openclaw/secretary/secretary.db`
-- [ ] Test CRUD operations standalone
+#### Todo Service
+- [ ] `POST /api/todos` — create todo (with tags as JSON)
+- [ ] `GET /api/todos/:id` — get single todo
+- [ ] `PATCH /api/todos/:id` — update fields (status, title, priority, due_date)
+- [ ] `DELETE /api/todos/:id` — delete todo
+- [ ] `GET /api/todos` — filter by status, priority, due_date range, pagination
+- [ ] Wire `create_todo` / `query_todos` / `update_todo` / `delete_todo` / `complete_todo` intents in orchestrator to actually create/query DB records
+- [ ] Return action cards via WebSocket after creating/completing todos
 
-### 1.3 Core Skills — SKILL.md + Scripts
-- [ ] `secretary-todo`: Create, list, update, complete, delete todos
-- [ ] `secretary-calendar`: Create, list, update, delete events
-- [ ] `secretary-memo`: Create, list, search, delete memos
-- [ ] Each skill: SKILL.md with clear triggers + Python scripts for DB ops
-- [ ] Test via OpenClaw WebChat: "add a todo", "what's on my calendar tomorrow"
+#### Calendar Service
+- [ ] `POST /api/events` — create event
+- [ ] `GET /api/events/:id` — get single event
+- [ ] `PATCH /api/events/:id` — update event
+- [ ] `DELETE /api/events/:id` — delete event
+- [ ] `GET /api/events` — filter by date range, pagination
+- [ ] Wire `create_event` / `query_events` / `update_event` / `delete_event` intents in orchestrator
+- [ ] Return action cards via WebSocket
 
-### 1.4 Intent Routing (via SKILL.md descriptions)
-- [ ] Write precise `description` fields so OpenClaw correctly routes to skills
-- [ ] Test ambiguous inputs ("remind me about the meeting" → calendar or todo?)
-- [ ] Add `references/` docs for edge cases
+#### Memo Service
+- [ ] `POST /api/memos` — create memo
+- [ ] `GET /api/memos/:id` — get single memo
+- [ ] `PATCH /api/memos/:id` — update memo
+- [ ] `DELETE /api/memos/:id` — delete memo
+- [ ] `GET /api/memos` — paginated list sorted by updated_at
+- [ ] Wire `create_memo` / `query_memos` / `update_memo` / `delete_memo` intents in orchestrator
 
-**Milestone**: Can manage todos, events, and memos entirely through OpenClaw chat.
+### Phase B — Search & Conversation Titles
 
----
+- [ ] Full-text search using SQLite FTS5 across messages, todos, events, memos
+- [ ] `GET /api/search?q=...&types=...` with relevance scoring
+- [ ] Auto-generate conversation titles from first user message (LLM summarization or first N words)
+- [ ] Wire `search` intent in orchestrator to return actual results
 
-## Phase 2 — Mobile App Shell (Weeks 3–4)
+### Phase C — Agent Tasks & Scheduling
 
-**Goal**: React Native app connected to OpenClaw, displaying data from skills.
+- [ ] Agent task execution pipeline (queue → run → complete/fail → notify)
+- [ ] Daily briefing generation (summarize today's events + pending todos via LLM)
+- [ ] Reminder system (check upcoming events/todo deadlines, push notification via WS)
+- [ ] Wire `delegate_task` and `daily_briefing` intents to real implementations
+- [ ] Background scheduler (APScheduler or similar)
 
-### 2.1 REST API Bridge
-- [ ] `secretary-api` skill: lightweight FastAPI/Flask sidecar
-  - Runs as a background process managed by OpenClaw
-  - Endpoints: `/todos`, `/events`, `/memos`, `/chat`, `/health`
-  - Reads/writes same SQLite DB as skills
-- [ ] Authentication: simple token-based (API key in app settings)
-- [ ] HTTPS via Tailscale or reverse proxy
+### Phase D — Database Migrations & Hardening
 
-### 2.2 React Native App — Screens
-- [ ] **SetupScreen**: Enter server URL + API token
-- [ ] **ChatScreen**: Connect to OpenClaw Gateway WebSocket, send/receive messages
-- [ ] **TodoScreen**: List, add, complete, delete (via REST API)
-- [ ] **CalendarScreen**: Month/week/day views (via REST API)
-- [ ] **MemoScreen**: List, create, edit (via REST API)
-- [ ] **SettingsScreen**: Server connection, LLM config, sync options
-- [ ] Tab navigation between screens
+- [ ] Add Alembic for migration management
+- [ ] Initial migration from current `create_all()` state
+- [ ] Token blacklist for proper logout (currently stateless)
+- [ ] Rate limiting on auth endpoints
+- [ ] Input validation hardening (content length limits, sanitization)
+- [ ] Request logging middleware
+- [ ] Tests (pytest + httpx AsyncClient for API, pytest-asyncio for services)
 
-### 2.3 State Management
-- [ ] Zustand stores for each module
-- [ ] Offline cache with sync-on-reconnect
-- [ ] WebSocket hook for real-time updates
+### Phase E — Mobile App
 
-**Milestone**: Functional app that shows todos/events/memos and can chat with AI.
+- [ ] React Native (Expo) project setup
+- [ ] Auth flow (server URL + PIN → token storage)
+- [ ] Chat screen with streaming text rendering
+- [ ] Action card components (todo created, event created, etc.)
+- [ ] Todo / Calendar / Memo screens (CRUD via REST API)
+- [ ] WebSocket connection manager with auto-reconnect
+- [ ] Zustand stores for state management
+- [ ] Push notifications for reminders and agent task completion
 
----
+### Phase F — Deployment & Polish
 
-## Phase 3 — Smart Features (Weeks 5–6)
-
-**Goal**: Proactive AI behavior — briefings, reminders, auto-tasks.
-
-### 3.1 Daily Briefing
-- [ ] OpenClaw cron job: every morning at configured time
-- [ ] `secretary-agent/briefing.py`: query today's events + pending todos
-- [ ] Generate natural language summary via LLM
-- [ ] Push to app via notification
-
-### 3.2 Reminders
-- [ ] Cron job: check events/todos approaching deadline every 15 min
-- [ ] Send push notification to app
-- [ ] Notification options: FCM, or WebSocket-based in-app alert
-
-### 3.3 Auto Agent Tasks
-- [ ] Task types: `search`, `summarize`, `draft`, `remind`
-- [ ] User says "research latest VLA papers" → creates agent_task
-- [ ] `task_runner.py` executes via OpenClaw tools (web search, file write)
-- [ ] Result saved to DB + notification sent
-
-### 3.4 Google Calendar Sync (Optional)
-- [ ] OAuth flow via app settings
-- [ ] Bidirectional sync: local events ↔ Google Calendar
-- [ ] Conflict resolution: last-write-wins with user prompt
-
-**Milestone**: App proactively sends briefings and executes delegated tasks.
-
----
-
-## Phase 4 — Widgets & Polish (Weeks 7–8)
-
-**Goal**: Home screen widgets, UX polish, deployment packaging.
-
-### 4.1 Home Screen Widgets
-- [ ] **Android**: Native widgets via react-native-android-widget
-  - Todo widget: today's tasks with checkboxes
-  - Calendar widget: next 3 upcoming events
-  - Quick input widget: text field → sends to AI
-- [ ] **iOS**: WidgetKit extension
-  - Similar widgets adapted for iOS design language
-- [ ] Widget ↔ app data sync via shared storage / background fetch
-
-### 4.2 Chat UX Improvements
-- [ ] Streaming responses (token-by-token display)
-- [ ] Action cards in chat (visual confirmation of created items)
-- [ ] Voice input support
-- [ ] Chat history with search
-
-### 4.3 Deployment Package
-- [ ] Docker Compose: OpenClaw + skills + API sidecar
+- [ ] Docker Compose (server + Ollama)
+- [ ] HTTPS setup guide (Tailscale / reverse proxy)
 - [ ] One-command setup script
-- [ ] Documentation: install guide, first-run walkthrough
-- [ ] Backup/restore tooling for SQLite DB
-
-### 4.4 Security Hardening
-- [ ] HTTPS enforcement (Tailscale Serve or Let's Encrypt)
-- [ ] API token rotation
-- [ ] Rate limiting on API endpoints
-- [ ] Input sanitization in all skills
-
-**Milestone**: Complete, deployable product with widgets and proactive AI.
+- [ ] Home screen widgets (Android + iOS)
+- [ ] Voice input support
+- [ ] Google Calendar sync (optional)
+- [ ] Backup/restore tooling
 
 ---
 
@@ -270,32 +238,28 @@ ai-secretary/
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| AI backbone | OpenClaw | Don't reinvent agent runtime, memory, scheduling |
-| Skill language | Python (scripts) | Richer DB/API ecosystem than bash |
-| Local DB | SQLite | Single-file, no config, sufficient for single-user |
-| App ↔ Server | REST + WebSocket | REST for CRUD, WS for chat streaming + notifications |
-| App framework | React Native | Cross-platform + native widget support |
-| State mgmt | Zustand | Minimal boilerplate, fast |
-| Deployment | Docker Compose | Reproducible, includes OpenClaw + Ollama |
+| Framework | FastAPI | Async, fast, built-in OpenAPI docs, WebSocket support |
+| Database | SQLite + aiosqlite | Single-file, zero-config, sufficient for single-user |
+| ORM | SQLAlchemy 2.0 async | Industry standard, type-safe, migration support |
+| Auth | JWT (python-jose) | Stateless, works well with mobile + WebSocket |
+| AI client | httpx async | SSE streaming support, connection pooling |
+| Intent classification | OpenAI tools/function-calling | Structured output, works with Ollama |
+| Background processing | FastAPI BackgroundTasks | Simple, no external queue needed for MVP |
+| ID format | Prefixed UUIDs | Human-readable, debuggable (conv_, msg_, etc.) |
+| Migrations | create_all() for now | Alembic deferred to Phase D |
 
 ---
 
-## Open Questions (To Resolve After Reading OpenClaw Code)
+## How to Run
 
-1. **Gateway API access**: Can the React Native app connect directly to OpenClaw's WebSocket Gateway, or do we need a custom bridge?
-2. **Skill ↔ Skill communication**: Can `secretary-agent` skill call `secretary-todo` skill internally, or must it go through the DB?
-3. **Background processes**: Can a skill run a persistent API server (FastAPI sidecar), or should we use OpenClaw's webhook system for the app to query data?
-4. **Push notifications**: Does OpenClaw have a built-in mechanism for mobile push, or do we need FCM/APNs integration in the API sidecar?
-5. **Skill data persistence**: Is `~/.openclaw/` the right place for the SQLite DB, or should it live in a dedicated data directory?
-6. **WebChat customization**: Could we skip the React Native app initially and build a custom WebChat frontend that includes todo/calendar/memo panels?
+```bash
+cd server
+python -m venv venv
+source venv/Scripts/activate  # Windows
+# source venv/bin/activate    # Linux/Mac
+pip install -r requirements.txt
+cp .env.example .env          # Edit PIN, AI settings
+uvicorn main:app --reload --port 8000
+```
 
-These will be answered by reviewing the OpenClaw source code (especially Gateway WS protocol, skill execution model, and tool sandboxing).
-
----
-
-## Next Steps
-
-1. **Read OpenClaw source** — Focus on: Gateway WS protocol, skill loading, tool execution, cron system
-2. **Prototype one skill** — `secretary-todo` with SKILL.md + Python CRUD scripts + SQLite
-3. **Test via WebChat** — Verify natural language → skill trigger → DB write → response
-4. **Then decide** — Build React Native app from scratch, or start with custom WebChat panel
+API docs: `http://localhost:8000/docs`
