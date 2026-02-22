@@ -81,7 +81,11 @@ class AIService:
             raise AIUnavailableError(f"AI provider timed out: {exc}") from exc
 
     async def function_call(
-        self, system_prompt: str, user_message: str, tools: list[dict]
+        self,
+        system_prompt: str,
+        user_message: str,
+        tools: list[dict],
+        tool_choice: dict | str = "auto",
     ) -> dict:
         headers = {}
         if self.api_key:
@@ -98,7 +102,7 @@ class AIService:
                         {"role": "user", "content": user_message},
                     ],
                     "tools": tools,
-                    "tool_choice": {"type": "function", "function": {"name": "classify_intent"}},
+                    "tool_choice": tool_choice,
                 },
                 headers=headers,
             )
@@ -116,32 +120,8 @@ class AIService:
             "the following user message. Reply with ONLY the title, no quotes or punctuation "
             "at the start/end."
         )
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_message},
-        ]
-
-        headers = {}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        if self.provider == "ollama":
-            url = f"{self.base_url}/api/chat"
-            payload = {"model": self.model, "messages": messages, "stream": False}
-        else:
-            url = f"{self.base_url}/v1/chat/completions"
-            payload = {"model": self.model, "messages": messages}
-
         try:
-            resp = await self.client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-
-            if self.provider == "ollama":
-                title = data.get("message", {}).get("content", "").strip()
-            else:
-                title = data["choices"][0]["message"]["content"].strip()
-
+            title = await self.generate_completion(system, user_message)
             # Trim to 60 chars max as safety net
             return title[:60] if title else "New Conversation"
         except Exception:

@@ -1,4 +1,3 @@
-import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
@@ -9,11 +8,19 @@ from auth.dependencies import get_current_user
 from database import get_db
 from exceptions import NotFoundError
 from models.todo import Todo
+from schemas.bulk import BulkTodoResponse, BulkTodoUpdate
 from schemas.common import PaginatedResponse
 from schemas.todo import TodoCreate, TodoResponse, TodoUpdate
-from utils import make_id
+from utils import apply_model_updates, deserialize_tags, make_id, serialize_tags
 
 router = APIRouter()
+
+_ORDER_COLUMNS = {
+    "created_at": Todo.created_at,
+    "updated_at": Todo.updated_at,
+    "sort_order": Todo.sort_order,
+    "priority": Todo.priority,
+}
 
 
 @router.get("", response_model=PaginatedResponse[TodoResponse])
@@ -23,6 +30,10 @@ async def list_todos(
     status: str | None = None,
     priority: str | None = None,
     due_before: datetime | None = None,
+    parent_id: str | None = None,
+    root_only: bool = False,
+    order_by: str = "created_at",
+    order_dir: str = "desc",
     db: AsyncSession = Depends(get_db),
     _user: str = Depends(get_current_user),
 ):
@@ -34,14 +45,21 @@ async def list_todos(
         conditions.append(Todo.priority == priority)
     if due_before:
         conditions.append(Todo.due_date <= due_before)
+    if parent_id:
+        conditions.append(Todo.parent_id == parent_id)
+    if root_only:
+        conditions.append(Todo.parent_id.is_(None))
 
     count_q = select(func.count(Todo.id)).where(*conditions)
     total = (await db.execute(count_q)).scalar() or 0
 
+    col = _ORDER_COLUMNS.get(order_by, Todo.created_at)
+    order_clause = col.asc() if order_dir == "asc" else col.desc()
+
     q = (
         select(Todo)
         .where(*conditions)
-        .order_by(Todo.created_at.desc())
+        .order_by(order_clause)
         .offset(offset)
         .limit(limit)
     )
@@ -51,10 +69,44 @@ async def list_todos(
     for row in rows:
         resp = TodoResponse.model_validate(row)
         if row.tags:
-            resp.tags = json.loads(row.tags)
+            resp.tags = deserialize_tags(row.tags)
         items.append(resp)
 
     return PaginatedResponse(items=items, total=total, page=page, limit=limit)
+
+
+@router.patch("/bulk", response_model=BulkTodoResponse)
+async def bulk_update_todos(
+    body: BulkTodoUpdate,
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(get_current_user),
+):
+    updated = 0
+    deleted = 0
+    errors: list[str] = []
+    for todo_id in body.ids:
+        todo = await db.get(Todo, todo_id)
+        if not todo:
+            errors.append(f"Todo {todo_id} not found")
+            continue
+        if body.delete:
+            await db.delete(todo)
+            deleted += 1
+        else:
+            if body.status is not None:
+                todo.status = body.status
+                if body.status == "completed" and not todo.completed_at:
+                    todo.completed_at = datetime.now(timezone.utc)
+                elif body.status != "completed":
+                    todo.completed_at = None
+            if body.priority is not None:
+                todo.priority = body.priority
+            if body.tags is not None:
+                todo.tags = serialize_tags(body.tags)
+            todo.updated_at = datetime.now(timezone.utc)
+            updated += 1
+    await db.commit()
+    return BulkTodoResponse(updated=updated, deleted=deleted, errors=errors)
 
 
 @router.post("", response_model=TodoResponse, status_code=201)
@@ -69,7 +121,9 @@ async def create_todo(
         description=body.description,
         priority=body.priority,
         due_date=body.due_date,
-        tags=json.dumps(body.tags) if body.tags else None,
+        tags=serialize_tags(body.tags),
+        parent_id=body.parent_id,
+        sort_order=body.sort_order or 0,
     )
     db.add(todo)
     await db.commit()
@@ -77,7 +131,7 @@ async def create_todo(
 
     resp = TodoResponse.model_validate(todo)
     if todo.tags:
-        resp.tags = json.loads(todo.tags)
+        resp.tags = deserialize_tags(todo.tags)
     return resp
 
 
@@ -92,7 +146,7 @@ async def get_todo(
         raise NotFoundError("Todo not found")
     resp = TodoResponse.model_validate(todo)
     if todo.tags:
-        resp.tags = json.loads(todo.tags)
+        resp.tags = deserialize_tags(todo.tags)
     return resp
 
 
@@ -108,11 +162,7 @@ async def update_todo(
         raise NotFoundError("Todo not found")
 
     data = body.model_dump(exclude_unset=True)
-    for key, value in data.items():
-        if key == "tags":
-            setattr(todo, key, json.dumps(value) if value else None)
-        else:
-            setattr(todo, key, value)
+    apply_model_updates(todo, data)
 
     # Auto-set completed_at when status changes to completed
     if "status" in data:
@@ -120,14 +170,12 @@ async def update_todo(
             todo.completed_at = datetime.now(timezone.utc)
         elif data["status"] != "completed":
             todo.completed_at = None
-
-    todo.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(todo)
 
     resp = TodoResponse.model_validate(todo)
     if todo.tags:
-        resp.tags = json.loads(todo.tags)
+        resp.tags = deserialize_tags(todo.tags)
     return resp
 
 

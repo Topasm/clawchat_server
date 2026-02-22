@@ -1,8 +1,6 @@
-import json
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import get_current_user
@@ -11,9 +9,41 @@ from exceptions import NotFoundError
 from models.event import Event
 from schemas.calendar import EventCreate, EventResponse, EventUpdate
 from schemas.common import PaginatedResponse
-from utils import make_id
+from services import calendar_service
+from utils import apply_model_updates, deserialize_tags, make_id, serialize_tags
 
 router = APIRouter()
+
+
+def _event_to_response(row) -> EventResponse:
+    """Convert an Event ORM object or virtual occurrence dict to EventResponse."""
+    if isinstance(row, dict):
+        # Virtual occurrence from recurrence expansion
+        tags = row.get("tags")
+        if isinstance(tags, str):
+            tags = deserialize_tags(tags)
+        return EventResponse(
+            id=row["id"],
+            title=row["title"],
+            description=row.get("description"),
+            start_time=row["start_time"],
+            end_time=row.get("end_time"),
+            location=row.get("location"),
+            is_all_day=row.get("is_all_day", False),
+            reminder_minutes=row.get("reminder_minutes"),
+            recurrence_rule=row.get("recurrence_rule"),
+            recurrence_end=row.get("recurrence_end"),
+            is_occurrence=row.get("is_occurrence", False),
+            occurrence_date=row.get("occurrence_date"),
+            recurring_event_id=row.get("recurring_event_id"),
+            tags=tags if isinstance(tags, list) else None,
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+    resp = EventResponse.model_validate(row)
+    if row.tags:
+        resp.tags = deserialize_tags(row.tags)
+    return resp
 
 
 @router.get("", response_model=PaginatedResponse[EventResponse])
@@ -25,31 +55,11 @@ async def list_events(
     db: AsyncSession = Depends(get_db),
     _user: str = Depends(get_current_user),
 ):
-    offset = (page - 1) * limit
-    conditions = []
-    if start_after:
-        conditions.append(Event.start_time >= start_after)
-    if start_before:
-        conditions.append(Event.start_time <= start_before)
-
-    count_q = select(func.count(Event.id)).where(*conditions)
-    total = (await db.execute(count_q)).scalar() or 0
-
-    q = (
-        select(Event)
-        .where(*conditions)
-        .order_by(Event.start_time.asc())
-        .offset(offset)
-        .limit(limit)
+    rows, total = await calendar_service.get_events(
+        db, start_after=start_after, start_before=start_before, page=page, limit=limit,
     )
-    rows = (await db.execute(q)).scalars().all()
 
-    items = []
-    for row in rows:
-        resp = EventResponse.model_validate(row)
-        if row.tags:
-            resp.tags = json.loads(row.tags)
-        items.append(resp)
+    items = [_event_to_response(row) for row in rows]
 
     return PaginatedResponse(items=items, total=total, page=page, limit=limit)
 
@@ -69,7 +79,9 @@ async def create_event(
         location=body.location,
         is_all_day=body.is_all_day,
         reminder_minutes=body.reminder_minutes,
-        tags=json.dumps(body.tags) if body.tags else None,
+        recurrence_rule=body.recurrence_rule,
+        recurrence_end=body.recurrence_end,
+        tags=serialize_tags(body.tags),
     )
     db.add(event)
     await db.commit()
@@ -77,7 +89,7 @@ async def create_event(
 
     resp = EventResponse.model_validate(event)
     if event.tags:
-        resp.tags = json.loads(event.tags)
+        resp.tags = deserialize_tags(event.tags)
     return resp
 
 
@@ -92,7 +104,7 @@ async def get_event(
         raise NotFoundError("Event not found")
     resp = EventResponse.model_validate(event)
     if event.tags:
-        resp.tags = json.loads(event.tags)
+        resp.tags = deserialize_tags(event.tags)
     return resp
 
 
@@ -108,19 +120,13 @@ async def update_event(
         raise NotFoundError("Event not found")
 
     data = body.model_dump(exclude_unset=True)
-    for key, value in data.items():
-        if key == "tags":
-            setattr(event, key, json.dumps(value) if value else None)
-        else:
-            setattr(event, key, value)
-
-    event.updated_at = datetime.now(timezone.utc)
+    apply_model_updates(event, data)
     await db.commit()
     await db.refresh(event)
 
     resp = EventResponse.model_validate(event)
     if event.tags:
-        resp.tags = json.loads(event.tags)
+        resp.tags = deserialize_tags(event.tags)
     return resp
 
 
@@ -134,4 +140,22 @@ async def delete_event(
     if not event:
         raise NotFoundError("Event not found")
     await db.delete(event)
+    await db.commit()
+
+
+@router.delete("/{event_id}/occurrences/{date}", status_code=204)
+async def delete_event_occurrence(
+    event_id: str,
+    date: str,
+    mode: str = Query("this_only", regex="^(this_only|this_and_future|all)$"),
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(get_current_user),
+):
+    """Delete a specific occurrence of a recurring event.
+
+    mode: this_only — exclude just this date
+          this_and_future — end recurrence before this date
+          all — delete entire series
+    """
+    await calendar_service.delete_event_occurrence(db, event_id, date, mode)
     await db.commit()

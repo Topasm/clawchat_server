@@ -7,13 +7,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from database import async_session_factory, init_db
 from exceptions import AppError, app_error_handler
+from routers import admin as admin_router
 from routers import auth as auth_router
 from routers import calendar as calendar_router
 from routers import chat as chat_router
 from routers import memo as memo_router
 from routers import notifications as notifications_router
 from routers import search as search_router
+from routers import settings as settings_router
+from routers import tags as tags_router
+from routers import tasks as tasks_router
 from routers import today as today_router
+from routers import task_relationship as task_relationship_router
+from routers import attachment as attachment_router
 from routers import todo as todo_router
 from services.ai_service import AIService
 from services.orchestrator import Orchestrator
@@ -92,6 +98,12 @@ app.include_router(memo_router.router, prefix="/api/memos", tags=["memos"])
 app.include_router(search_router.router, prefix="/api/search", tags=["search"])
 app.include_router(today_router.router, prefix="/api/today", tags=["today"])
 app.include_router(notifications_router.router, prefix="/api/notifications", tags=["notifications"])
+app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
+app.include_router(tags_router.router, prefix="/api/tags", tags=["tags"])
+app.include_router(tasks_router.router, prefix="/api/tasks", tags=["tasks"])
+app.include_router(task_relationship_router.router, prefix="/api/task-relationships", tags=["task-relationships"])
+app.include_router(attachment_router.router, prefix="/api/attachments", tags=["attachments"])
+app.include_router(admin_router.router, prefix="/api/admin", tags=["admin"])
 
 app.websocket("/ws")(websocket_endpoint)
 

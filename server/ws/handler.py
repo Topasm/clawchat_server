@@ -33,8 +33,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if msg_type == "typing":
                 pass  # Typing indicators — no server action needed for single-user
-            elif msg_type == "action_response":
-                pass  # Will be handled when module services are implemented
             else:
                 logger.warning("Unknown WS message type: %s", msg_type)
     except WebSocketDisconnect:

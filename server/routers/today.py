@@ -1,7 +1,6 @@
-import json
 from datetime import date, datetime, time, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +11,8 @@ from models.todo import Todo
 from schemas.calendar import EventResponse
 from schemas.today import TodayResponse
 from schemas.todo import TodoResponse
+from services.briefing_service import generate_briefing
+from utils import deserialize_tags
 
 router = APIRouter(tags=["today"])
 
@@ -28,15 +29,26 @@ def _get_greeting() -> str:
 def _todo_to_response(todo: Todo) -> TodoResponse:
     resp = TodoResponse.model_validate(todo)
     if todo.tags:
-        resp.tags = json.loads(todo.tags)
+        resp.tags = deserialize_tags(todo.tags)
     return resp
 
 
 def _event_to_response(event: Event) -> EventResponse:
     resp = EventResponse.model_validate(event)
     if event.tags:
-        resp.tags = json.loads(event.tags)
+        resp.tags = deserialize_tags(event.tags)
     return resp
+
+
+@router.get("/briefing")
+async def get_briefing(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(get_current_user),
+):
+    ai_service = request.app.state.ai_service
+    text = await generate_briefing(db, ai_service)
+    return {"briefing": text, "date": str(date.today())}
 
 
 @router.get("", response_model=TodayResponse)

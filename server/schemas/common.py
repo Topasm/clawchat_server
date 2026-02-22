@@ -10,13 +10,3 @@ class PaginatedResponse(BaseModel, Generic[T]):
     total: int
     page: int
     limit: int
-
-
-class ErrorDetail(BaseModel):
-    code: str
-    message: str
-    details: dict | None = None
-
-
-class ErrorResponse(BaseModel):
-    error: ErrorDetail

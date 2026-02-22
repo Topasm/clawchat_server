@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -16,6 +16,14 @@ class AgentTask(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, default="queued")
     result: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parent_task_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("agent_tasks.id"), nullable=True
+    )
+    agent_type: Mapped[str] = mapped_column(String, nullable=False, default="general")
+    progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sub_task_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed_sub_tasks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     conversation_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("conversations.id"), nullable=True
     )
@@ -31,4 +39,5 @@ class AgentTask(Base):
     __table_args__ = (
         Index("idx_agent_tasks_status", "status"),
         Index("idx_agent_tasks_conversation_id", "conversation_id"),
+        Index("idx_agent_tasks_parent", "parent_task_id"),
     )

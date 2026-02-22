@@ -125,11 +125,6 @@ def _format_briefing_prompt(data: dict) -> str:
     return "\n".join(lines)
 
 
-def _format_plain_briefing(data: dict) -> str:
-    """Plain text fallback when LLM is unavailable."""
-    return _format_briefing_prompt(data)
-
-
 async def generate_briefing(db: AsyncSession, ai_service: AIService) -> str:
     data = await gather_briefing_data(db)
 
@@ -158,4 +153,4 @@ async def generate_briefing(db: AsyncSession, ai_service: AIService) -> str:
         )
     except AIUnavailableError:
         logger.warning("LLM unavailable for briefing, using plain text fallback")
-        return _format_plain_briefing(data)
+        return _format_briefing_prompt(data)

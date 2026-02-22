@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
 from auth.dependencies import get_current_user
+from constants import SYSTEM_PROMPT
 from database import get_db
 from exceptions import NotFoundError
 from models.conversation import Conversation
@@ -19,18 +20,11 @@ from schemas.chat import (
     MessageResponse,
     SendMessageRequest,
     SendMessageResponse,
-    StreamSendRequest,
 )
 from schemas.common import PaginatedResponse
 from utils import make_id
 
 router = APIRouter()
-
-SYSTEM_PROMPT = (
-    "You are ClawChat, a helpful and friendly AI personal assistant. "
-    "You help the user manage their tasks, calendar, notes, and answer general questions. "
-    "Be concise but thorough. Use a warm, professional tone."
-)
 
 
 @router.get("/conversations", response_model=PaginatedResponse[ConversationResponse])
@@ -146,7 +140,7 @@ async def archive_conversation(
 
 @router.post("/stream")
 async def stream_chat(
-    body: StreamSendRequest,
+    body: SendMessageRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
     _user: str = Depends(get_current_user),

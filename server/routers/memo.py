@@ -1,6 +1,3 @@
-import json
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +8,7 @@ from exceptions import NotFoundError
 from models.memo import Memo
 from schemas.common import PaginatedResponse
 from schemas.memo import MemoCreate, MemoResponse, MemoUpdate
-from utils import make_id
+from utils import apply_model_updates, deserialize_tags, make_id, serialize_tags
 
 router = APIRouter()
 
@@ -40,7 +37,7 @@ async def list_memos(
     for row in rows:
         resp = MemoResponse.model_validate(row)
         if row.tags:
-            resp.tags = json.loads(row.tags)
+            resp.tags = deserialize_tags(row.tags)
         items.append(resp)
 
     return PaginatedResponse(items=items, total=total, page=page, limit=limit)
@@ -57,7 +54,7 @@ async def create_memo(
         id=make_id("memo_"),
         title=title,
         content=body.content,
-        tags=json.dumps(body.tags) if body.tags else None,
+        tags=serialize_tags(body.tags),
     )
     db.add(memo)
     await db.commit()
@@ -65,7 +62,7 @@ async def create_memo(
 
     resp = MemoResponse.model_validate(memo)
     if memo.tags:
-        resp.tags = json.loads(memo.tags)
+        resp.tags = deserialize_tags(memo.tags)
     return resp
 
 
@@ -80,7 +77,7 @@ async def get_memo(
         raise NotFoundError("Memo not found")
     resp = MemoResponse.model_validate(memo)
     if memo.tags:
-        resp.tags = json.loads(memo.tags)
+        resp.tags = deserialize_tags(memo.tags)
     return resp
 
 
@@ -96,19 +93,13 @@ async def update_memo(
         raise NotFoundError("Memo not found")
 
     data = body.model_dump(exclude_unset=True)
-    for key, value in data.items():
-        if key == "tags":
-            setattr(memo, key, json.dumps(value) if value else None)
-        else:
-            setattr(memo, key, value)
-
-    memo.updated_at = datetime.now(timezone.utc)
+    apply_model_updates(memo, data)
     await db.commit()
     await db.refresh(memo)
 
     resp = MemoResponse.model_validate(memo)
     if memo.tags:
-        resp.tags = json.loads(memo.tags)
+        resp.tags = deserialize_tags(memo.tags)
     return resp
 
 

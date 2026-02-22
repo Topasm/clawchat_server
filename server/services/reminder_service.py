@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.event import Event
 from models.todo import Todo
+from services.recurrence_service import generate_occurrences
 from ws.manager import ConnectionManager
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,47 @@ async def check_event_reminders(
         })
         _sent_reminders.add(key)
         sent += 1
+
+    # Check recurring event occurrences within the reminder window
+    recurring_q = (
+        select(Event)
+        .where(
+            Event.recurrence_rule != None,  # noqa: E711
+            Event.reminder_minutes != None,  # noqa: E711
+        )
+    )
+    recurring_events = (await db.execute(recurring_q)).scalars().all()
+
+    for event in recurring_events:
+        occurrences = generate_occurrences(event, now, window_end)
+        for occ in occurrences:
+            occ_start = occ["start_time"]
+            if isinstance(occ_start, str):
+                occ_start = datetime.fromisoformat(occ_start)
+
+            remind_at = occ_start - timedelta(minutes=event.reminder_minutes)
+            if remind_at > now:
+                continue
+
+            occ_dedup_key = occ["occurrence_date"]
+            key = ("event", event.id, occ_dedup_key)
+            if key in _sent_reminders:
+                continue
+
+            minutes_until = max(0, int((occ_start - now).total_seconds() / 60))
+            await ws_manager.send_json(user_id, {
+                "type": "reminder",
+                "data": {
+                    "reminder_type": "event",
+                    "item_id": event.id,
+                    "title": event.title,
+                    "message": f"'{event.title}' starts in {minutes_until} minute(s).",
+                    "minutes_until": minutes_until,
+                    "occurrence_date": occ_dedup_key,
+                },
+            })
+            _sent_reminders.add(key)
+            sent += 1
 
     return sent
 

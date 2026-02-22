@@ -1,6 +1,5 @@
 """Async service layer for todo CRUD operations."""
 
-import json
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
@@ -8,7 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from exceptions import NotFoundError
 from models.todo import Todo
-from utils import make_id
+from utils import apply_model_updates, make_id, serialize_tags
+
+
+_ORDER_COLUMNS = {
+    "created_at": Todo.created_at,
+    "updated_at": Todo.updated_at,
+    "sort_order": Todo.sort_order,
+    "priority": Todo.priority,
+}
 
 
 async def get_todos(
@@ -17,6 +24,10 @@ async def get_todos(
     status_filter: str | None = None,
     priority: str | None = None,
     due_before: datetime | None = None,
+    parent_id: str | None = None,
+    root_only: bool = False,
+    order_by: str = "created_at",
+    order_dir: str = "desc",
     page: int = 1,
     limit: int = 20,
 ) -> tuple[list[Todo], int]:
@@ -27,14 +38,21 @@ async def get_todos(
         conditions.append(Todo.priority == priority)
     if due_before is not None:
         conditions.append(Todo.due_date <= due_before)
+    if parent_id is not None:
+        conditions.append(Todo.parent_id == parent_id)
+    if root_only:
+        conditions.append(Todo.parent_id.is_(None))
 
     count_q = select(func.count(Todo.id)).where(*conditions)
     total = (await db.execute(count_q)).scalar() or 0
 
+    col = _ORDER_COLUMNS.get(order_by, Todo.created_at)
+    order_clause = col.asc() if order_dir == "asc" else col.desc()
+
     q = (
         select(Todo)
         .where(*conditions)
-        .order_by(Todo.created_at.desc())
+        .order_by(order_clause)
         .offset((page - 1) * limit)
         .limit(limit)
     )
@@ -57,6 +75,8 @@ async def create_todo(
     priority: str = "medium",
     due_date: datetime | None = None,
     tags: list[str] | None = None,
+    parent_id: str | None = None,
+    sort_order: int = 0,
 ) -> Todo:
     todo = Todo(
         id=make_id("todo_"),
@@ -64,7 +84,9 @@ async def create_todo(
         description=description,
         priority=priority,
         due_date=due_date,
-        tags=json.dumps(tags) if tags else None,
+        tags=serialize_tags(tags),
+        parent_id=parent_id,
+        sort_order=sort_order,
     )
     db.add(todo)
     await db.flush()
@@ -73,11 +95,7 @@ async def create_todo(
 
 async def update_todo(db: AsyncSession, todo_id: str, **updates) -> Todo:
     todo = await get_todo(db, todo_id)
-    for key, value in updates.items():
-        if key == "tags":
-            setattr(todo, key, json.dumps(value) if value else None)
-        else:
-            setattr(todo, key, value)
+    apply_model_updates(todo, updates)
 
     if "status" in updates:
         if updates["status"] == "completed" and not todo.completed_at:
@@ -85,7 +103,6 @@ async def update_todo(db: AsyncSession, todo_id: str, **updates) -> Todo:
         elif updates["status"] != "completed":
             todo.completed_at = None
 
-    todo.updated_at = datetime.now(timezone.utc)
     await db.flush()
     return todo
 

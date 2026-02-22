@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -33,9 +33,15 @@ class Todo(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
     tags: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
+    parent_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("todos.id", ondelete="SET NULL"), nullable=True
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     __table_args__ = (
         Index("idx_todos_status", "status"),
         Index("idx_todos_due_date", "due_date"),
         Index("idx_todos_conversation_id", "conversation_id"),
+        Index("idx_todos_parent_id", "parent_id"),
+        Index("idx_todos_sort_order", "sort_order"),
     )

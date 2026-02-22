@@ -1,6 +1,5 @@
 """Async service layer for memo CRUD operations."""
 
-import json
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
@@ -8,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from exceptions import NotFoundError
 from models.memo import Memo
-from utils import make_id
+from utils import apply_model_updates, make_id, serialize_tags
 
 
 async def get_memos(
@@ -48,7 +47,7 @@ async def create_memo(
         id=make_id("memo_"),
         title=title,
         content=content,
-        tags=json.dumps(tags) if tags else None,
+        tags=serialize_tags(tags),
     )
     db.add(memo)
     await db.flush()
@@ -57,13 +56,7 @@ async def create_memo(
 
 async def update_memo(db: AsyncSession, memo_id: str, **updates) -> Memo:
     memo = await get_memo(db, memo_id)
-    for key, value in updates.items():
-        if key == "tags":
-            setattr(memo, key, json.dumps(value) if value else None)
-        else:
-            setattr(memo, key, value)
-
-    memo.updated_at = datetime.now(timezone.utc)
+    apply_model_updates(memo, updates)
     await db.flush()
     return memo
 

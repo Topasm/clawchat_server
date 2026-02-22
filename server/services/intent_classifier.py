@@ -27,6 +27,9 @@ Intents:
 - search: User wants to search across all data (e.g., "find everything about VLA")
 - delegate_task: User wants to assign a complex async task to the AI agent
 - daily_briefing: User wants a summary of their day (e.g., "what's my day look like?")
+- suggest_time: User wants scheduling suggestions (e.g., "when should I schedule a team meeting?")
+- check_conflicts: User wants to check for scheduling conflicts (e.g., "do I have anything at 3pm?")
+- analyze_schedule: User wants schedule analysis (e.g., "how busy am I this week?")
 
 Extract relevant parameters from the message when applicable."""
 
@@ -59,6 +62,9 @@ INTENT_TOOLS_SCHEMA = [
                             "search",
                             "delegate_task",
                             "daily_briefing",
+                            "suggest_time",
+                            "check_conflicts",
+                            "analyze_schedule",
                         ],
                         "description": "The classified intent of the user's message",
                     },
@@ -95,6 +101,14 @@ INTENT_TOOLS_SCHEMA = [
                         "type": "string",
                         "description": "Search query if applicable",
                     },
+                    "duration": {
+                        "type": "integer",
+                        "description": "Event duration in minutes for scheduling suggestions",
+                    },
+                    "preferred_date": {
+                        "type": "string",
+                        "description": "Preferred date in ISO 8601 format for scheduling",
+                    },
                 },
                 "required": ["intent"],
             },
@@ -115,6 +129,7 @@ async def classify_intent(message: str, ai_service: AIService) -> IntentResult:
             system_prompt=CLASSIFIER_SYSTEM_PROMPT,
             user_message=message,
             tools=INTENT_TOOLS_SCHEMA,
+            tool_choice={"type": "function", "function": {"name": "classify_intent"}},
         )
 
         choices = response.get("choices", [])

@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     ai_api_key: str = ""
     ai_model: str = "llama3.2"
 
+    # File uploads
+    upload_dir: str = "data/uploads"
+    max_upload_size_mb: int = 10
+    allowed_extensions: str = "jpg,jpeg,png,gif,webp,svg,pdf,txt,md,zip"
+
     # Scheduler
     enable_scheduler: bool = False
     briefing_time: str = "08:00"

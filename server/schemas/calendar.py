@@ -11,6 +11,8 @@ class EventCreate(BaseModel):
     location: str | None = None
     is_all_day: bool = False
     reminder_minutes: int | None = None
+    recurrence_rule: str | None = None
+    recurrence_end: datetime | None = None
     tags: list[str] | None = None
 
 
@@ -22,6 +24,8 @@ class EventUpdate(BaseModel):
     location: str | None = None
     is_all_day: bool | None = None
     reminder_minutes: int | None = None
+    recurrence_rule: str | None = None
+    recurrence_end: datetime | None = None
     tags: list[str] | None = None
 
 
@@ -34,6 +38,11 @@ class EventResponse(BaseModel):
     location: str | None = None
     is_all_day: bool
     reminder_minutes: int | None = None
+    recurrence_rule: str | None = None
+    recurrence_end: datetime | None = None
+    is_occurrence: bool = False
+    occurrence_date: str | None = None
+    recurring_event_id: str | None = None
     tags: list[str] | None = None
     created_at: datetime
     updated_at: datetime

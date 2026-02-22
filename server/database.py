@@ -100,9 +100,23 @@ async def init_db():
     if db_dir:
         os.makedirs(db_dir, exist_ok=True)
 
+    from config import settings as app_settings
+    os.makedirs(app_settings.upload_dir, exist_ok=True)
+
     async with engine.begin() as conn:
         from models import _register_all  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
+
+        # Migrate existing DBs: add new columns (safe if already present)
+        _ALTER_TABLE_STMTS = [
+            "ALTER TABLE todos ADD COLUMN parent_id TEXT REFERENCES todos(id) ON DELETE SET NULL",
+            "ALTER TABLE todos ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+        ]
+        for stmt in _ALTER_TABLE_STMTS:
+            try:
+                await conn.execute(text(stmt))
+            except Exception:
+                pass  # column already exists
 
         # Create FTS5 virtual tables, triggers, and backfill existing data
         for stmt in _FTS5_VIRTUAL_TABLES + _FTS5_TRIGGERS + _FTS5_BACKFILL:

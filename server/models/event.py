@@ -19,6 +19,11 @@ class Event(Base):
     is_all_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     reminder_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     recurrence_rule: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recurrence_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    recurrence_exceptions: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array of ISO dates
+    recurring_event_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("events.id"), nullable=True
+    )
     conversation_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("conversations.id"), nullable=True
     )

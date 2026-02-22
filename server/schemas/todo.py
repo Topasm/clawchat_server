@@ -9,6 +9,8 @@ class TodoCreate(BaseModel):
     priority: str = "medium"
     due_date: datetime | None = None
     tags: list[str] | None = None
+    parent_id: str | None = None
+    sort_order: int | None = None
 
 
 class TodoUpdate(BaseModel):
@@ -18,6 +20,8 @@ class TodoUpdate(BaseModel):
     priority: str | None = None
     due_date: datetime | None = None
     tags: list[str] | None = None
+    parent_id: str | None = None
+    sort_order: int | None = None
 
 
 class TodoResponse(BaseModel):
@@ -29,6 +33,8 @@ class TodoResponse(BaseModel):
     due_date: datetime | None = None
     completed_at: datetime | None = None
     tags: list[str] | None = None
+    parent_id: str | None = None
+    sort_order: int = 0
     created_at: datetime
     updated_at: datetime
 
