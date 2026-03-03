@@ -9,7 +9,7 @@ from pydantic import BaseModel
 class ServerOverview(BaseModel):
     uptime_seconds: float
     version: str
-    ai_provider: str
+    ai_backend: str
     ai_model: str
     ai_base_url: str
     ai_connected: bool
@@ -46,7 +46,7 @@ class AdminOverviewResponse(BaseModel):
 
 
 class AIConfigResponse(BaseModel):
-    provider: str
+    backend: str
     model: str
     base_url: str
     connected: bool
@@ -107,7 +107,7 @@ class ServerConfigResponse(BaseModel):
     port: int
     database_url: str
     jwt_expiry_hours: int
-    ai_provider: str
+    ai_backend: str
     ai_base_url: str
     ai_model: str
     upload_dir: str

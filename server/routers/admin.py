@@ -55,7 +55,7 @@ async def get_overview(
     server = ServerOverview(
         uptime_seconds=admin_service.get_uptime_seconds(),
         version="0.1.0",
-        ai_provider=settings.ai_provider,
+        ai_backend="openclaw",
         ai_model=settings.ai_model,
         ai_base_url=settings.ai_base_url,
         ai_connected=getattr(request.app.state, "ai_connected", False),
@@ -86,25 +86,17 @@ async def get_ai_config(
     models: list[str] = []
     if connected:
         try:
-            if settings.ai_provider == "ollama":
-                resp = await ai_service.client.get(
-                    f"{ai_service.base_url}/api/tags", timeout=5.0
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    models = [m["name"] for m in data.get("models", [])]
-            else:
-                resp = await ai_service.client.get(
-                    f"{ai_service.base_url}/v1/models", timeout=5.0
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    models = [m["id"] for m in data.get("data", [])]
+            resp = await ai_service.client.get(
+                f"{ai_service.base_url}/v1/models", timeout=5.0
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                models = [m["id"] for m in data.get("data", [])]
         except Exception:
             pass
 
     return AIConfigResponse(
-        provider=settings.ai_provider,
+        backend="openclaw",
         model=settings.ai_model,
         base_url=settings.ai_base_url,
         connected=connected,
@@ -192,7 +184,7 @@ async def get_server_config(
         port=settings.port,
         database_url=db_display,
         jwt_expiry_hours=settings.jwt_expiry_hours,
-        ai_provider=settings.ai_provider,
+        ai_backend="openclaw",
         ai_base_url=settings.ai_base_url,
         ai_model=settings.ai_model,
         upload_dir=settings.upload_dir,

@@ -34,12 +34,11 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     await init_db()
 
-    # Create AI service
+    # Create AI service — relays to OpenClaw
     ai_service = AIService(
         base_url=settings.ai_base_url,
         api_key=settings.ai_api_key,
         model=settings.ai_model,
-        provider=settings.ai_provider,
     )
     app.state.ai_service = ai_service
 
@@ -114,7 +113,7 @@ async def health():
     return {
         "status": "ok" if ai_connected else "degraded",
         "version": "0.1.0",
-        "ai_provider": settings.ai_provider,
+        "ai_backend": "openclaw",
         "ai_model": settings.ai_model,
         "ai_connected": ai_connected,
     }

@@ -14,11 +14,10 @@ class Settings(BaseSettings):
     jwt_expiry_hours: int = 24
     pin: str = "123456"
 
-    # AI Provider
-    ai_provider: str = "ollama"
-    ai_base_url: str = "http://localhost:11434"
-    ai_api_key: str = ""
-    ai_model: str = "llama3.2"
+    # AI — delegates to OpenClaw gateway
+    ai_base_url: str = "http://localhost:3000"
+    ai_api_key: str = "openclaw"
+    ai_model: str = "openclaw"
 
     # File uploads
     upload_dir: str = "data/uploads"
