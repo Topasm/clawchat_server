@@ -18,3 +18,11 @@ server/data/
 .vscode/
 .idea/
 *.swp
+
+# Logs
+*.log
+logs/
+server/logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

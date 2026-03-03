@@ -147,7 +147,7 @@ async def delete_event(
 async def delete_event_occurrence(
     event_id: str,
     date: str,
-    mode: str = Query("this_only", regex="^(this_only|this_and_future|all)$"),
+    mode: str = Query("this_only", pattern="^(this_only|this_and_future|all)$"),
     db: AsyncSession = Depends(get_db),
     _user: str = Depends(get_current_user),
 ):

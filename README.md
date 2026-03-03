@@ -14,15 +14,46 @@ Standalone Python FastAPI backend for [ClawChat](../clawchat/) — a privacy-fir
 
 ## Quick Start
 
+### The Easiest Way (Mac/Linux)
+
+Run the included setup and run script:
+
 ```bash
 cd server
-python -m venv venv
-source venv/Scripts/activate  # Windows
-# source venv/bin/activate    # Linux/Mac
-pip install -r requirements.txt
-cp .env.example .env          # Edit PIN and AI settings
-uvicorn main:app --reload --port 8000
+chmod +x run.sh
+./run.sh
 ```
+
+### Manual Setup
+
+If you prefer to set it up manually or are on Windows:
+
+1. **Install Python 3.11+**
+   - Mac: `brew install python@3.11`
+   - Windows/Linux: Download from [python.org](https://python.org)
+
+2. **Create and Activate a Virtual Environment**
+   ```bash
+   cd server
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows: .\venv\Scripts\activate
+   ```
+
+3. **Install Dependencies and Configure**
+   ```bash
+   pip install -r requirements.txt
+   cp .env.example .env
+   ```
+   *Note: Edit `.env` to configure your PIN and AI API settings.*
+
+4. **Run the Server**
+   ```bash
+   # Foreground
+   uvicorn main:app --reload --port 8000 --host 0.0.0.0
+   
+   # Or run in the background (persistent on Mac/Linux) using screen:
+   # screen -dmS clawchat uvicorn main:app --reload --port 8000 --host 0.0.0.0
+   ```
 
 API docs at `http://localhost:8000/docs`
 

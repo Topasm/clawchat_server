@@ -1,9 +1,10 @@
+from typing import Optional
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
 
 class AppError(Exception):
-    def __init__(self, code: str, message: str, status_code: int = 500, details: dict | None = None):
+    def __init__(self, code: str, message: str, status_code: int = 500, details: Optional[dict] = None):
         self.code = code
         self.message = message
         self.status_code = status_code
@@ -26,7 +27,7 @@ class AIUnavailableError(AppError):
 
 
 class ValidationError(AppError):
-    def __init__(self, message: str, details: dict | None = None):
+    def __init__(self, message: str, details: Optional[dict] = None):
         super().__init__(code="VALIDATION_ERROR", message=message, status_code=400, details=details)
 
 
