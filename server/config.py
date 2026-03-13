@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -31,6 +32,17 @@ class Settings(BaseSettings):
     debug: bool = False
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def normalize_debug(cls, value):
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"release", "production", "prod"}:
+                return False
+            if normalized in {"debug", "development", "dev"}:
+                return True
+        return value
 
 
 settings = Settings()

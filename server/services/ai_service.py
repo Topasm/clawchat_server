@@ -131,8 +131,26 @@ class AIService:
 
     async def health_check(self) -> bool:
         try:
-            resp = await self.client.get(f"{self.base_url}/v1/models", timeout=5.0)
-            return resp.status_code == 200
+            resp = await self.client.get(
+                f"{self.base_url}/v1/models",
+                headers=self._auth_headers(),
+                timeout=5.0,
+            )
+            content_type = resp.headers.get("content-type", "").lower()
+            if resp.status_code == 200 and "application/json" in content_type:
+                return True
+        except Exception:
+            pass
+
+        # OpenClaw can expose chat completions without a /v1/models catalog.
+        # A 405 here confirms the endpoint exists and auth succeeded.
+        try:
+            resp = await self.client.get(
+                f"{self.base_url}/v1/chat/completions",
+                headers=self._auth_headers(),
+                timeout=5.0,
+            )
+            return resp.status_code == 405
         except Exception:
             return False
 
