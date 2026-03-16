@@ -37,6 +37,9 @@ class Todo(Base):
         String, ForeignKey("todos.id", ondelete="SET NULL"), nullable=True
     )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    assignee: Mapped[str | None] = mapped_column(String, nullable=True)
 
     __table_args__ = (
         Index("idx_todos_status", "status"),
@@ -44,4 +47,5 @@ class Todo(Base):
         Index("idx_todos_conversation_id", "conversation_id"),
         Index("idx_todos_parent_id", "parent_id"),
         Index("idx_todos_sort_order", "sort_order"),
+        Index("idx_todos_source", "source"),
     )

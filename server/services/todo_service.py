@@ -77,6 +77,9 @@ async def create_todo(
     tags: list[str] | None = None,
     parent_id: str | None = None,
     sort_order: int = 0,
+    source: str | None = None,
+    source_id: str | None = None,
+    assignee: str | None = None,
 ) -> Todo:
     todo = Todo(
         id=make_id("todo_"),
@@ -87,6 +90,9 @@ async def create_todo(
         tags=serialize_tags(tags),
         parent_id=parent_id,
         sort_order=sort_order,
+        source=source,
+        source_id=source_id,
+        assignee=assignee,
     )
     db.add(todo)
     await db.flush()

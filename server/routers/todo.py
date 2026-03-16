@@ -124,6 +124,9 @@ async def create_todo(
         tags=serialize_tags(body.tags),
         parent_id=body.parent_id,
         sort_order=body.sort_order or 0,
+        source=body.source,
+        source_id=body.source_id,
+        assignee=body.assignee,
     )
     db.add(todo)
     await db.commit()

@@ -111,6 +111,9 @@ async def init_db():
         _ALTER_TABLE_STMTS = [
             "ALTER TABLE todos ADD COLUMN parent_id TEXT REFERENCES todos(id) ON DELETE SET NULL",
             "ALTER TABLE todos ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE todos ADD COLUMN source TEXT",
+            "ALTER TABLE todos ADD COLUMN source_id TEXT",
+            "ALTER TABLE todos ADD COLUMN assignee TEXT",
         ]
         for stmt in _ALTER_TABLE_STMTS:
             try:

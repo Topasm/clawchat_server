@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = 10
     allowed_extensions: str = "jpg,jpeg,png,gif,webp,svg,pdf,txt,md,zip"
 
+    # Obsidian
+    obsidian_vault_path: str = ""
+
     # Scheduler
     enable_scheduler: bool = False
     briefing_time: str = "08:00"

@@ -11,6 +11,9 @@ class TodoCreate(BaseModel):
     tags: list[str] | None = None
     parent_id: str | None = None
     sort_order: int | None = None
+    source: str | None = None
+    source_id: str | None = None
+    assignee: str | None = None
 
 
 class TodoUpdate(BaseModel):
@@ -22,6 +25,7 @@ class TodoUpdate(BaseModel):
     tags: list[str] | None = None
     parent_id: str | None = None
     sort_order: int | None = None
+    assignee: str | None = None
 
 
 class TodoResponse(BaseModel):
@@ -35,6 +39,9 @@ class TodoResponse(BaseModel):
     tags: list[str] | None = None
     parent_id: str | None = None
     sort_order: int = 0
+    source: str | None = None
+    source_id: str | None = None
+    assignee: str | None = None
     created_at: datetime
     updated_at: datetime
 
