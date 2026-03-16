@@ -1,6 +1,9 @@
+import logging
 from collections.abc import AsyncIterator
 
 from fastapi import WebSocket
+
+logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:
@@ -17,7 +20,11 @@ class ConnectionManager:
     async def send_json(self, user_id: str, data: dict):
         ws = self.active_connections.get(user_id)
         if ws:
-            await ws.send_json(data)
+            try:
+                await ws.send_json(data)
+            except Exception:
+                logger.warning("Failed to send WS message to %s, removing connection", user_id)
+                self.disconnect(user_id)
 
     async def stream_to_user(
         self,
